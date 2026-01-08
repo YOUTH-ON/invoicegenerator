@@ -17,9 +17,9 @@ FONT_PATH = os.path.join(CURRENT_DIR, 'ipaexg.ttf')
 try:
     pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
 except:
-    st.error("ipaexg.ttf が見つかりません。")
+    st.error("ipaexg.ttf が見つかりません。リポジトリに配置してください。")
 
-# --- 住所検索 ---
+# --- 住所検索関数 ---
 def get_address_from_zip(zipcode):
     zipcode = zipcode.replace("-", "")
     try:
@@ -37,7 +37,6 @@ def create_invoice_pdf(data, items):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
-    # レイアウト配置（ご提示のひな形ベース）
     c.setFont(FONT_NAME, 10)
     c.drawString(400, height - 50, f"〒{data['issuer_zip']}")
     c.drawString(400, height - 65, data['issuer_address'])
@@ -53,7 +52,6 @@ def create_invoice_pdf(data, items):
     c.setFont(FONT_NAME, 18)
     c.drawCentredString(width / 2, height - 210, "御 請 求 書")
 
-    # 金額計算
     subtotal = sum(item['金額'] for item in items)
     tax = int(subtotal * 0.1)
     total = subtotal + tax
@@ -63,7 +61,6 @@ def create_invoice_pdf(data, items):
     c.setFont(FONT_NAME, 10)
     c.drawString(50, height - 275, f"(内消費税等 {tax:,} 円)")
 
-    # テーブル
     y = height - 310
     c.line(50, y, 550, y)
     c.drawString(60, y - 15, "品目")
@@ -108,57 +105,63 @@ st.title("請求書作成システム")
 with st.container(border=True):
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("発行者")
+        st.subheader("発行者情報")
         issuer_name = st.text_input("氏名/社名", value="横内 拓馬")
         i_zip = st.text_input("郵便番号", value="2040023", key="iz")
-        if st.button("発行者住所検索"):
+        if st.button("発行者住所を検索"):
             st.session_state.i_addr = get_address_from_zip(i_zip)
-        issuer_address = st.text_input("住所", value=st.session_state.get('i_addr', "東京都清瀬市竹丘2-33-23"))
-        issuer_reg_num = st.text_input("登録番号", value="T1234567890123")
+        issuer_address = st.text_input("発行者住所", value=st.session_state.get('i_addr', "東京都清瀬市竹丘2-33-23"))
+        issuer_reg_num = st.text_input("適格請求書発行事業者登録番号", value="T1234567890123")
     with col2:
-        st.subheader("取引先")
+        st.subheader("取引先情報")
         client_name = st.text_input("取引先名", value="株式会社 アットファンズ・マーケティング")
-        c_zip = st.text_input("郵便番号 ", value="1500043", key="cz")
-        if st.button("取引先住所検索"):
+        c_zip = st.text_input("取引先郵便番号", value="1500043", key="cz")
+        if st.button("取引先住所を検索"):
             st.session_state.c_addr = get_address_from_zip(c_zip)
-        client_address = st.text_input("住所 ", value=st.session_state.get('c_addr', "東京都渋谷区道玄坂1-21-1 SHIBUYA SOLASTA 3F"))
+        client_address = st.text_input("取引先住所", value=st.session_state.get('c_addr', "東京都渋谷区道玄坂1-21-1 SHIBUYA SOLASTA 3F"))
 
-# 2. 明細入力 (ここをボタン制御に)
+# 2. 明細入力
 st.subheader("明細の追加")
 with st.container(border=True):
     c1, c2, c3 = st.columns([3, 1, 1])
-    with c1: item_n = st.text_input("品目名", key="new_item_n")
-    with c2: item_q = st.number_input("数量", min_value=1, value=1)
-    with c3: item_p = st.number_input("単価", min_value=0, value=0, step=1000)
+    with c1: item_n = st.text_input("品目名", key="input_item_name")
+    with c2: item_q = st.number_input("数量", min_value=1, value=1, key="input_item_qty")
+    with c3: item_p = st.number_input("単価", min_value=0, value=0, step=1000, key="input_item_price")
     
-    if st.button("明細を追加する"):
+    if st.button("明細をリストに追加"):
         if item_n:
-            new_item = {"品目": item_n, "数量": item_q, "単価": item_p, "金額": item_q * item_p}
+            # 辞書形式で追加
+            new_item = {"品目": item_n, "数量": item_q, "単価": item_p, "金額": int(item_q * item_p)}
             st.session_state.items.append(new_item)
             st.rerun()
         else:
-            st.warning("品目名を入力してください")
+            st.error("品目名を入力してください")
 
-# 3. 明細一覧の表示と操作
-if st.session_state.items:
-    st.subheader("現在の明細一覧")
+# 3. 明細一覧の表示 (ここが修正ポイント)
+if len(st.session_state.items) > 0:
+    st.subheader("現在の請求明細")
     df = pd.DataFrame(st.session_state.items)
-    st.table(df) # 編集不可の静的な表として表示
-    if st.button("明細をすべてクリア"):
+    # インデックスを1から始める
+    df.index = df.index + 1
+    st.table(df)
+    
+    if st.button("明細をすべてリセット"):
         st.session_state.items = []
         st.rerun()
+else:
+    st.info("明細が追加されていません。上のフォームから追加してください。")
 
 # 4. 発行設定とPDF出力
 st.subheader("発行設定")
 with st.container(border=True):
     col_d1, col_d2 = st.columns(2)
-    with col_d1: date_val = st.date_input("発行日", datetime.now())
-    with col_d2: due_val = st.date_input("支払期日", datetime(2026, 1, 31))
-    bank_val = st.text_input("振込先", value="みずほ銀行清瀬支店 普通 1228611")
+    with col_d1: date_val = st.date_input("発行年月日", datetime.now())
+    with col_d2: due_val = st.date_input("お支払期限", datetime(2026, 1, 31))
+    bank_val = st.text_input("お振込先口座情報", value="みずほ銀行清瀬支店 普通 1228611")
 
-if st.button("PDFを確定・生成", type="primary"):
+if st.button("請求書PDFを作成する", type="primary"):
     if not st.session_state.items:
-        st.error("明細が1件もありません")
+        st.warning("明細を追加してから作成してください。")
     else:
         data = {
             'issuer_name': issuer_name, 'issuer_zip': i_zip, 'issuer_address': issuer_address,
@@ -167,5 +170,5 @@ if st.button("PDFを確定・生成", type="primary"):
             'due_date': due_val.strftime('%Y年%m月%d日'), 'bank_info': bank_val
         }
         pdf = create_invoice_pdf(data, st.session_state.items)
-        st.success("PDFが完成しました！")
-        st.download_button("ダウンロード", data=pdf, file_name=f"請求書_{client_name}.pdf")
+        st.success("PDFの生成に成功しました。")
+        st.download_button("PDFをダウンロード", data=pdf, file_name=f"請求書_{client_name}.pdf", mime="application/pdf")
