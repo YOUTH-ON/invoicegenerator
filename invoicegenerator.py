@@ -9,30 +9,53 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-# --- 1. アプリ初期設定とセッション初期化 (最優先) ---
+# --- 1. アプリ初期設定とセッション初期化 ---
 st.set_page_config(page_title="請求書ジェネレーター", layout="wide")
 
-if 'items' not in st.session_state:
-    st.session_state.items = []
-if 'i_addr' not in st.session_state:
-    st.session_state.i_addr = ""
-if 'c_addr' not in st.session_state:
-    st.session_state.c_addr = ""
+# 初期化を確実に行うための関数
+def initialize_session():
+    if 'items' not in st.session_state:
+        st.session_state['items'] = []
+    if 'i_addr' not in st.session_state:
+        st.session_state['i_addr'] = ""
+    if 'c_addr' not in st.session_state:
+        st.session_state['c_addr'] = ""
 
-# --- 2. フォント設定 ---
-FONT_NAME = 'JapaneseFont'
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH = os.path.join(CURRENT_DIR, 'ipaexg.ttf')
+initialize_session()
 
-try:
-    pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
-except:
-    st.error("ipaexg.ttf が見つかりません。リポジトリに配置してください。")
+# --- 2. 各種ボタンの動作関数 (Callbacks) ---
+def add_item_callback():
+    # 入力値を取得
+    name = st.session_state.get('input_item_n', '')
+    qty = st.session_state.get('input_item_q', 1)
+    price = st.session_state.get('input_item_p', 0)
+    
+    if name:
+        new_item = {"品目": name, "数量": qty, "単価": price, "金額": int(qty * price)}
+        # 安全にリストへ追加
+        st.session_state['items'].append(new_item)
+        # 入力欄をクリア（任意）
+    else:
+        st.warning("品目名を入力してください")
 
-# --- 3. 住所検索関数 ---
+def search_issuer_address():
+    zip_code = st.session_state.get('iz', '').replace("-", "").strip()
+    addr = get_address_from_zip(zip_code)
+    if addr:
+        st.session_state['i_addr'] = addr
+    else:
+        st.warning("住所が見つかりませんでした")
+
+def search_client_address():
+    zip_code = st.session_state.get('cz', '').replace("-", "").strip()
+    addr = get_address_from_zip(zip_code)
+    if addr:
+        st.session_state['c_addr'] = addr
+    else:
+        st.warning("住所が見つかりませんでした")
+
+# --- 3. 住所検索・PDF作成ロジック (省略なし) ---
 def get_address_from_zip(zipcode):
-    zipcode = zipcode.replace("-", "").strip()
-    if not zipcode: return ""
     try:
         res = requests.get(f"https://zipcloud.ibsnet.co.jp/api/search?zipcode={zipcode}")
         data = res.json()
@@ -42,11 +65,14 @@ def get_address_from_zip(zipcode):
     except: pass
     return ""
 
-# --- 4. PDF作成ロジック ---
 def create_invoice_pdf(data, items):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
+    
+    # フォント設定
+    FONT_NAME = 'JapaneseFont'
+    pdfmetrics.registerFont(TTFont(FONT_NAME, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ipaexg.ttf')))
     
     c.setFont(FONT_NAME, 10)
     c.drawString(400, height - 50, f"〒{data['issuer_zip']}")
@@ -72,7 +98,6 @@ def create_invoice_pdf(data, items):
     c.setFont(FONT_NAME, 10)
     c.drawString(50, height - 275, f"(内消費税等 {tax:,} 円)")
 
-    # テーブル描画
     y = height - 310
     c.line(50, y, 550, y)
     c.drawString(60, y - 15, "品目")
@@ -105,7 +130,7 @@ def create_invoice_pdf(data, items):
     buffer.seek(0)
     return buffer
 
-# --- 5. メイン UI ---
+# --- 4. メイン UI ---
 st.title("請求書作成システム")
 
 # 基本情報コンテナ
@@ -114,48 +139,35 @@ with st.container(border=True):
     with col1:
         st.subheader("発行者情報")
         issuer_name = st.text_input("氏名/社名", value="横内 拓馬")
-        i_zip = st.text_input("郵便番号", value="2040023")
-        if st.button("発行者住所を検索"):
-            st.session_state.i_addr = get_address_from_zip(i_zip)
-            st.rerun()
-        issuer_address = st.text_input("発行者住所", value=st.session_state.i_addr if st.session_state.i_addr else "東京都清瀬市竹丘2-33-23")
-        issuer_reg_num = st.text_input("適格請求書発行事業者登録番号", value="T1234567890123")
+        i_zip = st.text_input("郵便番号", value="2040023", key="iz")
+        st.button("発行者住所を検索", on_click=search_issuer_address)
+        issuer_address = st.text_input("発行者住所", value=st.session_state['i_addr'] if st.session_state['i_addr'] else "東京都清瀬市竹丘2-33-23")
+        issuer_reg_num = st.text_input("登録番号", value="T1234567890123")
     with col2:
         st.subheader("取引先情報")
         client_name = st.text_input("取引先名", value="株式会社 アットファンズ・マーケティング")
-        c_zip = st.text_input("取引先郵便番号", value="1500043")
-        if st.button("取引先住所を検索"):
-            st.session_state.c_addr = get_address_from_zip(c_zip)
-            st.rerun()
-        client_address = st.text_input("取引先住所", value=st.session_state.c_addr if st.session_state.c_addr else "東京都渋谷区道玄坂1-21-1 SHIBUYA SOLASTA 3F")
+        c_zip = st.text_input("郵便番号", value="1500043", key="cz")
+        st.button("取引先住所を検索", on_click=search_client_address)
+        client_address = st.text_input("取引先住所", value=st.session_state['c_addr'] if st.session_state['c_addr'] else "東京都渋谷区道玄坂1-21-1 SHIBUYA SOLASTA 3F")
 
-# 明細入力コンテナ
+# 明細入力
 st.subheader("明細の追加")
 with st.container(border=True):
     c1, c2, c3 = st.columns([3, 1, 1])
-    with c1: item_n = st.text_input("品目名")
-    with c2: item_q = st.number_input("数量", min_value=1, value=1)
-    with c3: item_p = st.number_input("単価", min_value=0, value=0, step=1000)
-    
-    if st.button("明細をリストに追加"):
-        if item_n:
-            new_item = {"品目": item_n, "数量": item_q, "単価": item_p, "金額": int(item_q * item_p)}
-            st.session_state.items.append(new_item)
-            st.rerun()
-        else:
-            st.warning("品目名を入力してください")
+    with c1: st.text_input("品目名", key="input_item_n")
+    with c2: st.number_input("数量", min_value=1, value=1, key="input_item_q")
+    with c3: st.number_input("単価", min_value=0, value=0, step=1000, key="input_item_p")
+    st.button("明細をリストに追加", on_click=add_item_callback)
 
-# 明細表示エリア
-# itemsが確実に存在し、かつ中身がある場合のみDataFrame化
-current_items = st.session_state.get('items', [])
-if isinstance(current_items, list) and len(current_items) > 0:
+# 明細表示
+if len(st.session_state['items']) > 0:
     st.subheader("現在の請求明細")
-    df = pd.DataFrame(current_items)
+    df = pd.DataFrame(st.session_state['items'])
     df.index = df.index + 1
     st.table(df)
     
     if st.button("明細をすべてリセット"):
-        st.session_state.items = []
+        st.session_state['items'] = []
         st.rerun()
 else:
     st.info("明細が追加されていません。")
@@ -170,7 +182,7 @@ with st.container(border=True):
 
 # PDF生成
 if st.button("請求書PDFを作成する", type="primary"):
-    if not st.session_state.items:
+    if not st.session_state['items']:
         st.warning("明細を追加してから作成してください。")
     else:
         data = {
@@ -179,6 +191,6 @@ if st.button("請求書PDFを作成する", type="primary"):
             'client_address': client_address, 'date': date_val.strftime('%Y年%m月%d日'),
             'due_date': due_val.strftime('%Y年%m月%d日'), 'bank_info': bank_val
         }
-        pdf = create_invoice_pdf(data, st.session_state.items)
+        pdf = create_invoice_pdf(data, st.session_state['items'])
         st.success("PDFの生成に成功しました。")
         st.download_button("PDFをダウンロード", data=pdf, file_name=f"請求書_{client_name}.pdf", mime="application/pdf")
