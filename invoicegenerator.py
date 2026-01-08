@@ -8,6 +8,7 @@ import os
 import requests
 import pandas as pd
 from datetime import datetime
+import hashlib # ① 固有番号生成用
 
 # --- 1. アプリ初期設定とセッション初期化 ---
 st.set_page_config(page_title="請求書ジェネレーター", layout="wide")
@@ -61,16 +62,18 @@ def create_invoice_pdf(data, items):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
-    # フォント登録
     FONT_NAME = 'JapaneseFont'
     pdfmetrics.registerFont(TTFont(FONT_NAME, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ipaexg.ttf')))
     
+    # ① 固有番号の表示（右上）
+    c.setFont(FONT_NAME, 9)
+    c.drawRightString(550, height - 30, f"No: {data['invoice_id']}")
+
     # 発行者情報
     c.setFont(FONT_NAME, 10)
     c.drawString(400, height - 50, f"〒{data['issuer_zip']}")
     c.drawString(400, height - 65, data['issuer_address'])
     
-    # ① 登録番号の表示制御
     y_offset = 80
     if not data['is_non_taxable']:
         c.drawString(400, height - y_offset, f"登録番号: {data['issuer_reg_num']}")
@@ -88,16 +91,21 @@ def create_invoice_pdf(data, items):
     c.setFont(FONT_NAME, 18)
     c.drawCentredString(width / 2, height - 210, "御 請 求 書")
 
-    # ② 税率計算
+    # ② 金額計算（源泉徴収対応）
     subtotal = sum(item['金額'] for item in items)
-    tax_rate = data['tax_rate'] / 100
-    tax = int(subtotal * tax_rate)
-    total = subtotal + tax
+    tax = int(subtotal * (data['tax_rate'] / 100))
+    total_with_tax = subtotal + tax
+    
+    withholding = 0
+    if data['is_withholding']:
+        withholding = int(subtotal * (data['withholding_rate'] / 100))
+    
+    final_total = total_with_tax - withholding
 
     c.setFont(FONT_NAME, 14)
-    c.drawString(50, height - 260, f"御請求金額 {total:,} 円")
+    c.drawString(50, height - 260, f"御請求金額 {final_total:,} 円")
     c.setFont(FONT_NAME, 10)
-    c.drawString(50, height - 275, f"(内消費税等({data['tax_rate']}%) {tax:,} 円)")
+    c.drawString(50, height - 275, f"(消費税({data['tax_rate']}%)込み。源泉徴収税控除後金額)")
 
     # 明細テーブル
     y = height - 310
@@ -117,18 +125,28 @@ def create_invoice_pdf(data, items):
         curr_y -= 20
     
     c.line(50, curr_y + 5, 550, curr_y + 5)
+    
+    # 計算エリア
     c.drawString(380, curr_y - 15, "小計")
-    c.drawString(480, curr_y - 15, f"{subtotal:,}")
+    c.drawString(480, curr_y - 15, f"{subtotal:,}円")
     c.drawString(380, curr_y - 30, f"消費税({data['tax_rate']}%)")
-    c.drawString(480, curr_y - 30, f"{tax:,}")
-    c.drawString(380, curr_y - 45, "合計金額")
-    c.drawString(480, curr_y - 45, f"{total:,}")
+    c.drawString(480, curr_y - 30, f"{tax:,}円")
+    
+    if data['is_withholding']:
+        c.drawString(380, curr_y - 45, f"源泉徴収税({data['withholding_rate']}%)")
+        c.drawString(480, curr_y - 45, f"- {withholding:,}円")
+        curr_y -= 15
 
-    # ③ 振込先と手数料の表示
-    c.drawString(50, curr_y - 80, f"支払期日 ：{data['due_date']}")
-    c.drawString(50, curr_y - 95, f"振込先 ：{data['bank_info']}")
+    c.setFont(FONT_NAME, 11)
+    c.drawString(380, curr_y - 50, "合計請求金額")
+    c.drawString(480, curr_y - 50, f"{final_total:,}円")
+    c.setFont(FONT_NAME, 10)
+
+    # 振込先
+    c.drawString(50, curr_y - 90, f"支払期日 ：{data['due_date']}")
+    c.drawString(50, curr_y - 105, f"振込先 ：{data['bank_info']}")
     if data['fee_burden'] == "取引先負担":
-        c.drawString(50, curr_y - 110, "その他 ：振込手数料は貴社負担でお願いいたします。")
+        c.drawString(50, curr_y - 120, "その他 ：振込手数料は貴社負担でお願いいたします。")
 
     c.showPage()
     c.save()
@@ -136,7 +154,7 @@ def create_invoice_pdf(data, items):
     return buffer
 
 # --- 4. メイン UI ---
-st.title("請求書作成システム")
+st.title("請求書作成システム (Pro)")
 
 # 基本情報
 with st.container(border=True):
@@ -148,12 +166,11 @@ with st.container(border=True):
         st.button("発行者住所を検索", on_click=search_issuer_address)
         issuer_address = st.text_input("発行者住所", value=st.session_state['i_addr'] if st.session_state['i_addr'] else "東京都清瀬市竹丘2-33-23")
         
-        # ① 登録番号とチェックボックスの配置
         reg_col1, reg_col2 = st.columns([2, 1])
         with reg_col1:
             issuer_reg_num = st.text_input("適格請求書発行事業者登録番号", value="T1234567890123")
         with reg_col2:
-            st.write("") # 位置調整用
+            st.write("") 
             is_non_taxable = st.checkbox("登録番号なし")
 
     with col2:
@@ -183,7 +200,7 @@ if len(current_items) > 0:
         st.session_state['items'] = []
         st.rerun()
 
-# ② & ③ 発行設定
+# ② 発行設定 (源泉徴収・手数料・固有番号)
 st.subheader("発行設定")
 with st.container(border=True):
     col_s1, col_s2, col_s3 = st.columns(3)
@@ -191,24 +208,35 @@ with st.container(border=True):
         date_val = st.date_input("発行年月日", datetime.now())
         due_val = st.date_input("お支払期限", datetime(2026, 1, 31))
     with col_s2:
-        tax_rate = st.number_input("消費税率 (%)", min_value=0, max_value=100, value=10) # ② 税率
-        fee_burden = st.radio("振込手数料の負担", ["発行者負担", "取引先負担"], index=1) # ③ 手数料
+        tax_rate = st.number_input("消費税率 (%)", min_value=0, max_value=100, value=10)
+        is_withholding = st.toggle("源泉徴収する", value=False) # ② 源泉徴収トグル
+        withholding_rate = st.number_input("源泉徴収率 (%)", value=10.21, format="%.2f", disabled=not is_withholding)
     with col_s3:
-        bank_val = st.text_area("お振込先口座情報", value="みずほ銀行清瀬支店\n普通 1228611", height=100)
+        fee_burden = st.radio("振込手数料の負担", ["発行者負担", "取引先負担"], index=1)
+        bank_val = st.text_area("お振込先口座情報", value="みずほ銀行清瀬支店\n普通 1228611", height=80)
 
 # PDF生成
-if st.button("請求書PDFを作成する", type="primary"):
+if st.button("請求書PDFを確定・生成する", type="primary"):
     if not st.session_state['items']:
         st.warning("明細を追加してから作成してください。")
     else:
+        # ① 固有番号（ハッシュ）の生成
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        hash_id = hashlib.md5(timestamp.encode()).hexdigest()[:8].upper()
+        invoice_id = f"INV-{timestamp[:8]}-{hash_id}"
+        
         data = {
+            'invoice_id': invoice_id,
             'issuer_name': issuer_name, 'issuer_zip': i_zip, 'issuer_address': issuer_address,
             'issuer_reg_num': issuer_reg_num, 'is_non_taxable': is_non_taxable,
             'client_name': client_name, 'client_zip': c_zip, 'client_address': client_address,
             'date': date_val.strftime('%Y年%m月%d日'), 'due_date': due_val.strftime('%Y年%m月%d日'),
             'bank_info': bank_val.replace('\n', ' / '), 
-            'tax_rate': tax_rate, 'fee_burden': fee_burden
+            'tax_rate': tax_rate, 'fee_burden': fee_burden,
+            'is_withholding': is_withholding, 'withholding_rate': withholding_rate
         }
+        
         pdf = create_invoice_pdf(data, st.session_state['items'])
-        st.success("PDFの生成に成功しました。")
-        st.download_button("PDFをダウンロード", data=pdf, file_name=f"請求書_{client_name}.pdf", mime="application/pdf")
+        st.success(f"PDF生成成功: {invoice_id}")
+        # ファイル名を固有番号に変更
+        st.download_button("PDFをダウンロード", data=pdf, file_name=f"{invoice_id}.pdf", mime="application/pdf")
