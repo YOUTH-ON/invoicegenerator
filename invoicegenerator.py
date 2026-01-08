@@ -161,7 +161,7 @@ def create_invoice_pdf(data, items):
     return buffer
 
 # --- 4. メイン UI ---
-st.title("請求書作成システム (Pro)")
+st.title("即席請求書")
 
 # 基本情報
 with st.container(border=True):
@@ -245,4 +245,5 @@ if st.button("請求書PDFを確定・生成する", type="primary"):
         pdf = create_invoice_pdf(data, st.session_state['items'])
         st.success(f"PDF生成成功: {invoice_id}")
         st.download_button("PDFをダウンロード", data=pdf, file_name=f"{invoice_id}.pdf", mime="application/pdf")
+
 
