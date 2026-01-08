@@ -8,7 +8,7 @@ import os
 import requests
 import pandas as pd
 from datetime import datetime
-import hashlib # ① 固有番号生成用
+import hashlib
 
 # --- 1. アプリ初期設定とセッション初期化 ---
 st.set_page_config(page_title="請求書ジェネレーター", layout="wide")
@@ -63,9 +63,10 @@ def create_invoice_pdf(data, items):
     width, height = A4
     
     FONT_NAME = 'JapaneseFont'
-    pdfmetrics.registerFont(TTFont(FONT_NAME, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ipaexg.ttf')))
+    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ipaexg.ttf')
+    pdfmetrics.registerFont(TTFont(FONT_NAME, font_path))
     
-    # ① 固有番号の表示（右上）
+    # 固有番号（右上）
     c.setFont(FONT_NAME, 9)
     c.drawRightString(550, height - 30, f"No: {data['invoice_id']}")
 
@@ -91,7 +92,7 @@ def create_invoice_pdf(data, items):
     c.setFont(FONT_NAME, 18)
     c.drawCentredString(width / 2, height - 210, "御 請 求 書")
 
-    # ② 金額計算（源泉徴収対応）
+    # 金額計算
     subtotal = sum(item['金額'] for item in items)
     tax = int(subtotal * (data['tax_rate'] / 100))
     total_with_tax = subtotal + tax
@@ -102,10 +103,16 @@ def create_invoice_pdf(data, items):
     
     final_total = total_with_tax - withholding
 
+    # メインの御請求金額表示
     c.setFont(FONT_NAME, 14)
     c.drawString(50, height - 260, f"御請求金額 {final_total:,} 円")
+    
+    # 文言の条件分岐（修正ポイント）
     c.setFont(FONT_NAME, 10)
-    c.drawString(50, height - 275, f"(消費税({data['tax_rate']}%)込み。源泉徴収税控除後金額)")
+    if data['is_withholding']:
+        c.drawString(50, height - 275, f"(消費税({data['tax_rate']}%)込み。源泉徴収税控除後金額)")
+    else:
+        c.drawString(50, height - 275, f"(消費税({data['tax_rate']}%)込み)")
 
     # 明細テーブル
     y = height - 310
@@ -135,7 +142,7 @@ def create_invoice_pdf(data, items):
     if data['is_withholding']:
         c.drawString(380, curr_y - 45, f"源泉徴収税({data['withholding_rate']}%)")
         c.drawString(480, curr_y - 45, f"- {withholding:,}円")
-        curr_y -= 15
+        curr_y -= 15 # 源泉徴収がある時だけ行をずらす
 
     c.setFont(FONT_NAME, 11)
     c.drawString(380, curr_y - 50, "合計請求金額")
@@ -200,7 +207,7 @@ if len(current_items) > 0:
         st.session_state['items'] = []
         st.rerun()
 
-# ② 発行設定 (源泉徴収・手数料・固有番号)
+# 発行設定
 st.subheader("発行設定")
 with st.container(border=True):
     col_s1, col_s2, col_s3 = st.columns(3)
@@ -209,7 +216,7 @@ with st.container(border=True):
         due_val = st.date_input("お支払期限", datetime(2026, 1, 31))
     with col_s2:
         tax_rate = st.number_input("消費税率 (%)", min_value=0, max_value=100, value=10)
-        is_withholding = st.toggle("源泉徴収する", value=False) # ② 源泉徴収トグル
+        is_withholding = st.toggle("源泉徴収する", value=False)
         withholding_rate = st.number_input("源泉徴収率 (%)", value=10.21, format="%.2f", disabled=not is_withholding)
     with col_s3:
         fee_burden = st.radio("振込手数料の負担", ["発行者負担", "取引先負担"], index=1)
@@ -220,7 +227,6 @@ if st.button("請求書PDFを確定・生成する", type="primary"):
     if not st.session_state['items']:
         st.warning("明細を追加してから作成してください。")
     else:
-        # ① 固有番号（ハッシュ）の生成
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         hash_id = hashlib.md5(timestamp.encode()).hexdigest()[:8].upper()
         invoice_id = f"INV-{timestamp[:8]}-{hash_id}"
@@ -238,5 +244,4 @@ if st.button("請求書PDFを確定・生成する", type="primary"):
         
         pdf = create_invoice_pdf(data, st.session_state['items'])
         st.success(f"PDF生成成功: {invoice_id}")
-        # ファイル名を固有番号に変更
         st.download_button("PDFをダウンロード", data=pdf, file_name=f"{invoice_id}.pdf", mime="application/pdf")
