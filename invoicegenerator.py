@@ -11,7 +11,7 @@ from datetime import datetime
 import hashlib
 
 # --- 1. アプリ初期設定とセッション初期化 ---
-st.set_page_config(page_title="請求書ジェネレーター", layout="wide")
+st.set_page_config(page_title="即席請求書", layout="wide")
 
 def initialize_session():
     if 'items' not in st.session_state:
@@ -168,10 +168,10 @@ with st.container(border=True):
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("発行者情報")
-        issuer_name = st.text_input("氏名/社名", value="横内 拓馬")
-        i_zip = st.text_input("郵便番号", value="2040023", key="iz")
+        issuer_name = st.text_input("氏名/社名", value="即席 太郎")
+        i_zip = st.text_input("郵便番号", value="1000001", key="iz")
         st.button("発行者住所を検索", on_click=search_issuer_address)
-        issuer_address = st.text_input("発行者住所", value=st.session_state['i_addr'] if st.session_state['i_addr'] else "東京都清瀬市竹丘2-33-23")
+        issuer_address = st.text_input("発行者住所", value=st.session_state['i_addr'] if st.session_state['i_addr'] else "東京都千代田区千代田")
         
         reg_col1, reg_col2 = st.columns([2, 1])
         with reg_col1:
@@ -182,10 +182,10 @@ with st.container(border=True):
 
     with col2:
         st.subheader("取引先情報")
-        client_name = st.text_input("取引先名", value="株式会社 アットファンズ・マーケティング")
-        c_zip = st.text_input("取引先郵便番号", value="1500043", key="cz")
+        client_name = st.text_input("取引先名", value="株式会社 即席請求書")
+        c_zip = st.text_input("取引先郵便番号", value="1000001", key="cz")
         st.button("取引先住所を検索", on_click=search_client_address)
-        client_address = st.text_input("取引先住所", value=st.session_state['c_addr'] if st.session_state['c_addr'] else "東京都渋谷区道玄坂1-21-1 SHIBUYA SOLASTA 3F")
+        client_address = st.text_input("取引先住所", value=st.session_state['c_addr'] if st.session_state['c_addr'] else "東京都千代田区千代田")
 
 # 明細入力
 st.subheader("明細の追加")
@@ -220,7 +220,7 @@ with st.container(border=True):
         withholding_rate = st.number_input("源泉徴収率 (%)", value=10.21, format="%.2f", disabled=not is_withholding)
     with col_s3:
         fee_burden = st.radio("振込手数料の負担", ["発行者負担", "取引先負担"], index=1)
-        bank_val = st.text_area("お振込先口座情報", value="みずほ銀行清瀬支店\n普通 1228611", height=80)
+        bank_val = st.text_area("お振込先口座情報", value="即席銀行biz支店\n普通 1000001", height=80)
 
 # PDF生成
 if st.button("請求書PDFを確定・生成する", type="primary"):
@@ -245,3 +245,4 @@ if st.button("請求書PDFを確定・生成する", type="primary"):
         pdf = create_invoice_pdf(data, st.session_state['items'])
         st.success(f"PDF生成成功: {invoice_id}")
         st.download_button("PDFをダウンロード", data=pdf, file_name=f"{invoice_id}.pdf", mime="application/pdf")
+
